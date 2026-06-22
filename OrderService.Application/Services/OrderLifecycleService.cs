@@ -62,7 +62,7 @@ public class OrderLifecycleService : IOrderLifecycleService
         TransitionAsync(
             id,
             order => order.Cancel(reason ?? "Cancelled by request"),
-            (order, previous, ct) => RefundIfPaidAsync(order, previous, reason, ct),
+            (order, previous, ct) => OnOrderCancelledAsync(order, previous, reason, ct),
             cancellationToken);
 
     public Task<OrderResponseDto> ChangeStatusAsync(Guid id, ChangeStatusDto dto, CancellationToken cancellationToken = default)
@@ -99,6 +99,28 @@ public class OrderLifecycleService : IOrderLifecycleService
 
         _logger.LogInformation("Order {OrderId} status changed from {From} to {To}", order.Id, previous, order.Status);
         return _mapper.Map<OrderResponseDto>(order);
+    }
+
+    /// <summary>
+    /// Побочные действия при отмене заказа: публикация события отмены для возврата
+    /// зарезервированного товара на склад (его слушает ProductService) и возврат денег,
+    /// если заказ был оплачен.
+    /// </summary>
+    private async Task OnOrderCancelledAsync(Order order, OrderStatus previousStatus, string? reason, CancellationToken cancellationToken)
+    {
+        await _eventPublisher.PublishAsync(new OrderCancelledEvent
+        {
+            OrderId = order.Id,
+            Reason = reason,
+            CancelledAt = DateTime.UtcNow,
+            Items = order.Items.Select(i => new OrderCancelledItem
+            {
+                ProductId = i.ProductId,
+                Quantity = i.Quantity
+            }).ToList()
+        }, cancellationToken);
+
+        await RefundIfPaidAsync(order, previousStatus, reason, cancellationToken);
     }
 
     private Task PublishPaidAsync(Order order, OrderStatus previous, CancellationToken cancellationToken) =>

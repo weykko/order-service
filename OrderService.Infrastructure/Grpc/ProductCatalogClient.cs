@@ -46,11 +46,29 @@ public class ProductCatalogClient : IProductCatalogClient
                 IsInStock = reply.IsInStock
             };
         }
-        catch (RpcException ex) when (ex.StatusCode == StatusCode.NotFound)
+        catch (RpcException ex) when (IsProductNotFound(ex))
         {
-            // Товар не найден в системе продуктов.
+            // Товар не найден в системе продуктов: возвращаем null,
+            // прикладной слой превратит это в корректный 404, а не 500.
+            _logger.LogInformation("Product {ProductId} not found in catalog: {Status}", productId, ex.StatusCode);
             return null;
         }
+    }
+
+    /// <summary>
+    /// Определяет, означает ли gRPC-ошибка отсутствие товара. Помимо штатного
+    /// NotFound учитываем Unknown/Internal: система продуктов пробрасывает
+    /// доменное "не найдено" необёрнутым, и gRPC мапит его в Unknown.
+    /// </summary>
+    private static bool IsProductNotFound(RpcException ex)
+    {
+        if (ex.StatusCode == StatusCode.NotFound)
+            return true;
+
+        if (ex.StatusCode is StatusCode.Unknown or StatusCode.Internal)
+            return ex.Status.Detail.Contains("not found", StringComparison.OrdinalIgnoreCase);
+
+        return false;
     }
 
     public async Task<bool> ReserveStockAsync(Guid productId, int quantity, CancellationToken cancellationToken = default)

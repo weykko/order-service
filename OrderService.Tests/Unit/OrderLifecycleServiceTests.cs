@@ -97,7 +97,7 @@ public class OrderLifecycleServiceTests
         var result = await _sut.CancelAsync(order.Id, "changed mind");
 
         result.Status.Should().Be(nameof(OrderStatus.Cancelled));
-        _publisher.Verify(b => b.PublishAsync(It.IsAny<OrderCancelledEvent>(), It.IsAny<CancellationToken>()), Times.Never);
+        _publisher.Verify(b => b.PublishAsync(It.IsAny<OrderCancelledEvent>(), It.IsAny<CancellationToken>()), Times.Once);
         _publisher.Verify(b => b.PublishAsync(It.IsAny<OrderRefundedEvent>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -110,6 +110,7 @@ public class OrderLifecycleServiceTests
         var result = await _sut.CancelAsync(order.Id, "mistake");
 
         result.Status.Should().Be(nameof(OrderStatus.Cancelled));
+        _publisher.Verify(b => b.PublishAsync(It.IsAny<OrderCancelledEvent>(), It.IsAny<CancellationToken>()), Times.Once);
         _publisher.Verify(b => b.PublishAsync(It.IsAny<OrderRefundedEvent>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
