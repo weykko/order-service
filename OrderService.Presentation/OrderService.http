@@ -1,0 +1,47 @@
+@host = http://localhost:5276
+
+### Создать заказ
+POST {{host}}/api/v1/orders
+Content-Type: application/json
+
+{
+  "currency": "RUB",
+  "customer": {
+    "fullName": "Иван Иванов",
+    "email": "ivan@example.com",
+    "phone": "+79990000000",
+    "shippingAddress": "Москва, ул. Пушкина, д. 1"
+  },
+  "items": [
+    { "productId": "00000000-0000-0000-0000-000000000000", "quantity": 2 }
+  ]
+}
+
+### Получить заказ
+GET {{host}}/api/v1/orders/00000000-0000-0000-0000-000000000000
+
+### Список заказов (фильтр и пагинация)
+GET {{host}}/api/v1/orders?status=Created&page=1&pageSize=20
+
+### История статусов заказа
+GET {{host}}/api/v1/orders/00000000-0000-0000-0000-000000000000/history
+
+### Оплатить заказ
+POST {{host}}/api/v1/orders/00000000-0000-0000-0000-000000000000/pay
+
+### Сменить статус
+POST {{host}}/api/v1/orders/00000000-0000-0000-0000-000000000000/status
+Content-Type: application/json
+
+{
+  "status": "Assembling",
+  "comment": "Начали сборку"
+}
+
+### Отменить заказ
+POST {{host}}/api/v1/orders/00000000-0000-0000-0000-000000000000/cancel
+Content-Type: application/json
+
+{
+  "reason": "Передумал"
+}

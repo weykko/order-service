@@ -1,0 +1,103 @@
+﻿services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: order-service-postgres
+    environment:
+      POSTGRES_DB: OrderServiceDb
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d OrderServiceDb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - order-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: order-service-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - order-network
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: order-service-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    restart: unless-stopped
+    networks:
+      - order-network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: order-service-kafka
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+    ports:
+      - "29092:29092"
+    restart: unless-stopped
+    networks:
+      - order-network
+
+  orderservice:
+    image: orderservice
+    container_name: order-service-api
+    build:
+      context: .
+      dockerfile: OrderService.Presentation/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__PostgreSQL: "Host=postgres;Port=5432;Database=OrderServiceDb;Username=postgres;Password=postgres"
+      Redis__ConnectionString: "redis:6379"
+      Kafka__BootstrapServers: "kafka:9092"
+      ProductCatalog__BaseUrl: "http://productservice:8080"
+    ports:
+      - "8081:8080"
+    restart: unless-stopped
+    networks:
+      - order-network
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  order-network:
+    driver: bridge
