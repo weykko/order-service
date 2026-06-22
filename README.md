@@ -3,17 +3,19 @@
 Микросервис системы заказов учебного проекта «Маркетплейс». Отвечает за оформление
 заказов, их обработку и изменение статусов с сохранением полной истории. Является
 частью микросервисной архитектуры и взаимодействует с системой продуктов
-(**ProductService**) синхронно по HTTP и асинхронно через Kafka.
+(**ProductService**) синхронно через gRPC и асинхронно через Kafka.
+С фронтендом сервис общается по HTTP (REST).
 
 ## Технологический стек
 
 | Категория            | Технология                                   |
 |----------------------|----------------------------------------------|
-| Платформа            | .NET 9 / ASP.NET Core (Web API, только HTTP) |
+| Платформа            | .NET 9 / ASP.NET Core (REST для фронта)         |
 | База данных          | PostgreSQL                                   |
 | Доступ к данным      | Dapper (чистый SQL, без ORM)                 |
 | Миграции             | FluentMigrator                               |
-| Валидация            | FluentValidation                             |A
+| Валидация            | FluentValidation                             |
+| Межсервисный sync    | gRPC (Grpc.Net.Client / Grpc.AspNetCore)     |
 | Кеширование          | Redis + in-memory (двухуровневый кеш)        |
 | Брокер сообщений     | Apache Kafka (Confluent.Kafka)               |
 | Маппинг              | AutoMapper                                   |
@@ -25,7 +27,7 @@
 ```
 OrderService.Domain          // Сущности, value objects, стейт-машина заказа, интерфейсы
 OrderService.Application     // Use cases, DTO, абстракции, события, валидаторы, маппинг
-OrderService.Infrastructure  // Dapper-репозитории, миграции, Redis, Kafka, HTTP-клиент
+OrderService.Infrastructure  // Dapper-репозитории, миграции, Redis, Kafka, gRPC-клиент
 OrderService.Presentation    // REST-контроллеры, обработка ошибок, DI, точка входа
 OrderService.Tests           // Unit + интеграционные тесты
 ```
@@ -60,15 +62,23 @@ Created ──▶ Paid ──▶ Assembling ──▶ Shipped ──▶ Delivere
 | GET   | `/api/v1/orders`                     | Список заказов (фильтр, пагинация)      |
 | GET   | `/api/v1/orders/{id}`                | Заказ по id (с кешем)                   |
 | GET   | `/api/v1/orders/{id}/history`        | История статусов заказа                 |
-| POST  | `/api/v1/orders/{id}/pay`            | Оплата (симуляция) → статус `Paid`      |
-| POST  | `/api/v1/orders/{id}/cancel`         | Отмена заказа                           |
+| POST  | `/api/v1/orders/{id}/pay`            | Оплата (симуляция): Created → `Paid`        |
+| POST  | `/api/v1/orders/{id}/assemble`       | В сборку: Paid → `Assembling`            |
+| POST  | `/api/v1/orders/{id}/ship`           | В доставку: Assembling → `Shipped`        |
+| POST  | `/api/v1/orders/{id}/deliver`        | Доставлен: Shipped → `Delivered`         |
+| POST  | `/api/v1/orders/{id}/cancel`         | Отмена заказа → `Cancelled`              |
 | POST  | `/api/v1/orders/{id}/status`         | Произвольный переход статуса            |
 
 ## Интеграция с ProductService
 
-**Синхронно (HTTP, исходящие вызовы):**
-- `GET /api/v1/products/{id}` — получение актуальной цены и наличия товара.
-- `POST /api/v1/products/{id}/reserve` — резервирование товара при оформлении заказа.
+**Синхронно (gRPC, исходящие вызовы).** Контракт описан в `product_catalog.proto`
+(пакет `productcatalog`, сервис `ProductCatalog`), общий для обоих сервисов:
+- `GetProduct(product_id)` — получение актуальной цены и наличия товара;
+- `ReserveStock(product_id, quantity)` — резервирование товара при оформлении заказа.
+
+> gRPC работает поверх HTTP/2. ProductService слушает один порт в режиме
+> `Http1AndHttp2` (REST для фронта + gRPC для OrderService); адрес gRPC задаётся
+> настройкой `ProductCatalog:GrpcAddress`.
 
 **Асинхронно (Kafka, публикуемые события).** Имя топика = имя типа события без
 суффикса `Event` в нижнем регистре, тело — JSON в camelCase (контракт совместим
@@ -88,7 +98,7 @@ Created ──▶ Paid ──▶ Assembling ──▶ Shipped ──▶ Delivere
 
 ### Общая схема (контекст)
 
-Два канала связи: **синхронный** (HTTP, запрос-ответ) для проверки и резерва
+Два канала связи: **синхронный** (gRPC, запрос-ответ) для проверки и резерва
 товара и **асинхронный** (Kafka, события) для уведомлений о фактах.
 
 ```mermaid
@@ -103,6 +113,7 @@ flowchart LR
 
     subgraph PS["ProductService"]
         PAPI["REST API\n/api/v1/products"]
+        PGRPC["gRPC\nProductCatalog"]
         PPG[("PostgreSQL\nproducts, stocks")]
     end
 
@@ -111,7 +122,7 @@ flowchart LR
     FE -->|HTTP| OAPI
     FE -->|HTTP| PAPI
 
-    OAPI -->|"GET /products/{id}\nPOST /products/{id}/reserve"| PAPI
+    OAPI -->|"gRPC: GetProduct,\nReserveStock"| PGRPC
     OAPI --- OPG
     OAPI --- ORD
     PAPI --- PPG
@@ -134,18 +145,18 @@ sequenceDiagram
 
     Client->>OS: POST /api/v1/orders
     loop по каждой позиции
-        OS->>PS: GET /api/v1/products/{id}
+        OS->>PS: gRPC GetProduct(productId)
         alt товар не найден
-            PS-->>OS: 404 Not Found
+            PS-->>OS: ProductReply { found = false }
             OS-->>Client: 404 (NotFoundException)
         else товар найден
-            PS-->>OS: ProductResponseDto (цена, наличие)
-            OS->>PS: POST /api/v1/products/{id}/reserve {quantity}
+            PS-->>OS: ProductReply (цена, наличие)
+            OS->>PS: gRPC ReserveStock(productId, quantity)
             alt остатка не хватает
-                PS-->>OS: false
+                PS-->>OS: ReserveStockReply { reserved = false }
                 OS-->>Client: 409 (BusinessRuleException)
             else зарезервировано
-                PS-->>OS: true (reserved += N)
+                PS-->>OS: ReserveStockReply { reserved = true }
             end
         end
     end

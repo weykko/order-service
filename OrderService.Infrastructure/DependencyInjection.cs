@@ -4,7 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using OrderService.Application.Abstractions;
 using OrderService.Domain.Interfaces;
 using OrderService.Infrastructure.Cache;
-using OrderService.Infrastructure.Http;
+using OrderService.Infrastructure.Grpc;
 using OrderService.Infrastructure.Messaging;
 using OrderService.Infrastructure.Persistence;
 using OrderService.Infrastructure.Repositories;
@@ -61,10 +61,12 @@ public static class DependencyInjection
         var options = configuration.GetSection(ProductCatalogOptions.SectionName).Get<ProductCatalogOptions>()
             ?? new ProductCatalogOptions();
 
-        services.AddHttpClient<IProductCatalogClient, ProductCatalogClient>(client =>
+        // gRPC-клиент к системе продуктов: сгенерированный клиент + адаптер IProductCatalogClient.
+        services.AddGrpcClient<ProductCatalog.Grpc.ProductCatalog.ProductCatalogClient>(o =>
         {
-            client.BaseAddress = new Uri(options.BaseUrl);
-            client.Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds);
+            o.Address = new Uri(options.GrpcAddress);
         });
+
+        services.AddScoped<IProductCatalogClient, ProductCatalogClient>();
     }
 }

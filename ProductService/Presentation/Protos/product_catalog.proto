@@ -1,0 +1,38 @@
+﻿syntax = "proto3";
+
+option csharp_namespace = "ProductCatalog.Grpc";
+
+package productcatalog;
+
+// Контракт каталога продуктов для синхронного межсервисного взаимодействия.
+// Используется системой заказов (OrderService) при оформлении заказа.
+service ProductCatalog {
+  // Возвращает сведения о товаре (цена, наличие) либо found=false, если товар не найден.
+  rpc GetProduct (GetProductRequest) returns (ProductReply);
+
+  // Пытается зарезервировать указанное количество товара на складе.
+  rpc ReserveStock (ReserveStockRequest) returns (ReserveStockReply);
+}
+
+message GetProductRequest {
+  string product_id = 1;
+}
+
+message ProductReply {
+  bool found = 1;
+  string id = 2;
+  string name = 3;
+  double price = 4;
+  string currency = 5;
+  int32 available_stock = 6;
+  bool is_in_stock = 7;
+}
+
+message ReserveStockRequest {
+  string product_id = 1;
+  int32 quantity = 2;
+}
+
+message ReserveStockReply {
+  bool reserved = 1;
+}

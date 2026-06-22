@@ -64,6 +64,36 @@ public class OrdersController(IOrderService orderService) : ControllerBase
         return Ok(order);
     }
 
+    [HttpPost("{id:guid}/assemble")]
+    [ProducesResponseType(typeof(OrderResponseDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<OrderResponseDto>> Assemble(Guid id, CancellationToken cancellationToken)
+    {
+        var order = await _orderService.AssembleAsync(id, cancellationToken);
+        return Ok(order);
+    }
+
+    [HttpPost("{id:guid}/ship")]
+    [ProducesResponseType(typeof(OrderResponseDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<OrderResponseDto>> Ship(Guid id, CancellationToken cancellationToken)
+    {
+        var order = await _orderService.ShipAsync(id, cancellationToken);
+        return Ok(order);
+    }
+
+    [HttpPost("{id:guid}/deliver")]
+    [ProducesResponseType(typeof(OrderResponseDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<OrderResponseDto>> Deliver(Guid id, CancellationToken cancellationToken)
+    {
+        var order = await _orderService.DeliverAsync(id, cancellationToken);
+        return Ok(order);
+    }
+
     [HttpPost("{id:guid}/cancel")]
     [ProducesResponseType(typeof(OrderResponseDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]

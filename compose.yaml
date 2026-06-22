@@ -85,7 +85,7 @@
       ConnectionStrings__PostgreSQL: "Host=postgres;Port=5432;Database=OrderServiceDb;Username=postgres;Password=postgres"
       Redis__ConnectionString: "redis:6379"
       Kafka__BootstrapServers: "kafka:9092"
-      ProductCatalog__BaseUrl: "http://productservice:8080"
+      ProductCatalog__GrpcAddress: "http://productservice:8080"
     ports:
       - "8081:8080"
     restart: unless-stopped

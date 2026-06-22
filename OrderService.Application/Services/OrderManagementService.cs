@@ -158,6 +158,15 @@ public class OrderManagementService : IOrderService
         return _mapper.Map<OrderResponseDto>(order);
     }
 
+    public Task<OrderResponseDto> AssembleAsync(Guid id, CancellationToken cancellationToken = default) =>
+        ApplyLifecycleTransitionAsync(id, order => order.StartAssembling("Assembling started"), cancellationToken);
+
+    public Task<OrderResponseDto> ShipAsync(Guid id, CancellationToken cancellationToken = default) =>
+        ApplyLifecycleTransitionAsync(id, order => order.Ship("Shipped to delivery"), cancellationToken);
+
+    public Task<OrderResponseDto> DeliverAsync(Guid id, CancellationToken cancellationToken = default) =>
+        ApplyLifecycleTransitionAsync(id, order => order.Deliver("Delivered to customer"), cancellationToken);
+
     public async Task<OrderResponseDto> CancelAsync(Guid id, string? reason, CancellationToken cancellationToken = default)
     {
         var order = await LoadOrderAsync(id, cancellationToken);
@@ -198,6 +207,24 @@ public class OrderManagementService : IOrderService
         await PublishStatusChangedAsync(order, previous, targetStatus, cancellationToken);
 
         _logger.LogInformation("Order {OrderId} status changed from {From} to {To}", order.Id, previous, targetStatus);
+        return _mapper.Map<OrderResponseDto>(order);
+    }
+
+    /// <summary>
+    /// Общий сценарий перехода по жизненному циклу: загрузка, доменный переход,
+    /// сохранение и публикация события о смене статуса.
+    /// </summary>
+    private async Task<OrderResponseDto> ApplyLifecycleTransitionAsync(
+        Guid id, Action<Order> transition, CancellationToken cancellationToken)
+    {
+        var order = await LoadOrderAsync(id, cancellationToken);
+        var previous = order.Status;
+
+        transition(order);
+        await PersistTransitionAsync(order, cancellationToken);
+        await PublishStatusChangedAsync(order, previous, order.Status, cancellationToken);
+
+        _logger.LogInformation("Order {OrderId} status changed from {From} to {To}", order.Id, previous, order.Status);
         return _mapper.Map<OrderResponseDto>(order);
     }
 
