@@ -1,0 +1,70 @@
+﻿syntax = "proto3";
+
+option csharp_namespace = "ProductServiceGrpc.Grpc";
+
+package product;
+
+// Контракт каталога продуктов системы продуктов (ProductService).
+// Зеркало серверного product.proto — используется системой заказов как gRPC-клиент.
+service ProductServiceGrpc {
+  rpc GetProduct (GetProductRequest) returns (ProductResponse);
+  rpc GetProducts (GetProductsRequest) returns (GetProductsResponse);
+  rpc GetProductsBatch (GetProductsBatchRequest) returns (GetProductsBatchResponse);
+}
+
+message GetProductRequest {
+  string id = 1;
+}
+
+message ProductResponse {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  double price = 4;
+  string currency = 5;
+  string sku = 6;
+  string category = 7;
+  int32 available_stock = 8;
+  bool is_in_stock = 9;
+  int32 lead_time_days = 10;
+  string created_at = 11;
+  string updated_at = 12;
+}
+
+message GetProductsRequest {
+  string search = 1;
+  string category = 2;
+  double min_price = 3;
+  double max_price = 4;
+  bool in_stock_only = 5;
+  int32 page = 6;
+  int32 page_size = 7;
+  string sort_by = 8;
+  bool sort_descending = 9;
+}
+
+message GetProductsResponse {
+  repeated ProductResponse items = 1;
+  int32 total_count = 2;
+  int32 page = 3;
+  int32 page_size = 4;
+  int32 total_pages = 5;
+}
+
+message GetProductsBatchRequest {
+  repeated string ids = 1;
+}
+
+message GetProductsBatchResponse {
+  repeated ProductBatchItem items = 1;
+}
+
+message ProductBatchItem {
+  string id = 1;
+  string name = 2;
+  double price = 3;
+  string currency = 4;
+  int32 available_stock = 5;
+  bool is_available = 6;
+  int32 lead_time_days = 7;
+}

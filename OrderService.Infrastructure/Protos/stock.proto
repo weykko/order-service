@@ -1,0 +1,72 @@
+﻿syntax = "proto3";
+
+option csharp_namespace = "StockServiceGrpc.Grpc";
+
+package stock;
+
+// Контракт склада системы продуктов (ProductService).
+// Зеркало серверного stock.proto — используется системой заказов как gRPC-клиент.
+service StockServiceGrpc {
+  rpc GetStockInfo (GetStockInfoRequest) returns (StockInfoResponse);
+  rpc ReserveStock (ReserveStockRequest) returns (ReserveStockResponse);
+  rpc CommitReservation (CommitReservationRequest) returns (CommitReservationResponse);
+  rpc CancelReservation (CancelReservationRequest) returns (CancelReservationResponse);
+  rpc AddStock (AddStockRequest) returns (AddStockResponse);
+}
+
+message GetStockInfoRequest {
+  string product_id = 1;
+}
+
+message StockInfoResponse {
+  string product_id = 1;
+  int32 quantity = 2;
+  int32 reserved = 3;
+  int32 available = 4;
+  string warehouse = 5;
+  int32 lead_time_days = 6;
+  bool is_in_stock = 7;
+}
+
+message ReserveStockRequest {
+  string product_id = 1;
+  int32 quantity = 2;
+}
+
+message ReserveStockResponse {
+  bool success = 1;
+  string message = 2;
+  int32 available_after = 3;
+}
+
+message CommitReservationRequest {
+  string product_id = 1;
+  int32 quantity = 2;
+}
+
+message CommitReservationResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message CancelReservationRequest {
+  string product_id = 1;
+  int32 quantity = 2;
+}
+
+message CancelReservationResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message AddStockRequest {
+  string product_id = 1;
+  int32 quantity = 2;
+  string warehouse = 3;
+}
+
+message AddStockResponse {
+  bool success = 1;
+  string message = 2;
+  int32 new_quantity = 3;
+}

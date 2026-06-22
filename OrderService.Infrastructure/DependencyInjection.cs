@@ -61,10 +61,18 @@ public static class DependencyInjection
         var options = configuration.GetSection(ProductCatalogOptions.SectionName).Get<ProductCatalogOptions>()
             ?? new ProductCatalogOptions();
 
-        // gRPC-клиент к системе продуктов: сгенерированный клиент + адаптер IProductCatalogClient.
-        services.AddGrpcClient<ProductCatalog.Grpc.ProductCatalog.ProductCatalogClient>(o =>
+        // gRPC-клиенты к системе продуктов: каталог (ProductServiceGrpc) и склад (StockServiceGrpc).
+        // Оба обслуживаются одним gRPC-эндпоинтом ProductService.
+        var grpcAddress = new Uri(options.GrpcAddress);
+
+        services.AddGrpcClient<ProductServiceGrpc.Grpc.ProductServiceGrpc.ProductServiceGrpcClient>(o =>
         {
-            o.Address = new Uri(options.GrpcAddress);
+            o.Address = grpcAddress;
+        });
+
+        services.AddGrpcClient<StockServiceGrpc.Grpc.StockServiceGrpc.StockServiceGrpcClient>(o =>
+        {
+            o.Address = grpcAddress;
         });
 
         services.AddScoped<IProductCatalogClient, ProductCatalogClient>();
