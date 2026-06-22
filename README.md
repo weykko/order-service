@@ -261,10 +261,35 @@ dotnet run --project OrderService
 dotnet test
 ```
 
-- **Unit** (`OrderService.Tests/Unit`): стейт-машина заказа и сценарии
-  `OrderManagementService` (на моках инфраструктуры).
+- **Unit** (`OrderService.Tests/Unit`): стейт-машина заказа, value objects
+  (`Money`, `CustomerInfo`, `OrderItem`) и сценарии прикладного слоя
+  (`OrderCreationService`, `OrderQueryService`, `OrderLifecycleService`) на моках.
 - **Integration** (`OrderService.Tests/Integration`): `OrderRepository` на
   реальном PostgreSQL через Testcontainers с применением миграций FluentMigrator.
   > Для запуска интеграционных тестов требуется установленный и запущенный Docker.
+
+### Покрытие кода
+
+Сбор покрытия выполняется через `coverlet.collector` в формате Cobertura:
+
+```bash
+# Только юнит-тесты (без Docker), с отчётом покрытия в ./coverage:
+dotnet test --filter "FullyQualifiedName~Unit" \
+  --collect:"XPlat Code Coverage" --results-directory ./coverage
+```
+
+Итоговый файл: `coverage/<guid>/coverage.cobertura.xml`. Для читаемого HTML-отчёта
+можно использовать ReportGenerator:
+
+```bash
+dotnet tool install -g dotnet-reportgenerator-globaltool
+reportgenerator -reports:./coverage/**/coverage.cobertura.xml \
+  -targetdir:./coverage/report -reporttypes:Html
+```
+
+Текущее покрытие (юнит-прогон): слой **Application — ~95%** строк,
+**Domain — ~84%** строк. Слой Infrastructure (`OrderRepository`) покрывается
+интеграционными тестами (требуют Docker). Автогенерируемый gRPC-код,
+DTO/события и DI-регистрация в метрике не учитываются как значимые.
 
 ---

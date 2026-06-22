@@ -11,6 +11,7 @@ using OrderService.Application.Validators;
 using OrderService.Domain.Enums;
 using OrderService.Domain.Interfaces;
 using OrderService.Domain.Models;
+using OrderService.Tests.Helpers;
 using Xunit;
 
 namespace OrderService.Tests.Unit;
@@ -54,6 +55,76 @@ public class OrderQueryServiceTests
         _repository.Setup(r => r.GetByIdAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync((Order?)null);
 
         var act = () => _sut.GetByIdAsync(id);
+
+        await act.Should().ThrowAsync<NotFoundException>();
+    }
+
+    [Fact]
+    public async Task GetByIdAsync_WhenNotCached_ShouldLoadFromRepository_AndPopulateCache()
+    {
+        var order = OrderFactory.CreateOrder();
+        _cache.Setup(c => c.GetAsync(order.Id, It.IsAny<CancellationToken>())).ReturnsAsync((OrderResponseDto?)null);
+        _repository.Setup(r => r.GetByIdAsync(order.Id, It.IsAny<CancellationToken>())).ReturnsAsync(order);
+        _cache.Setup(c => c.SetAsync(order.Id, It.IsAny<OrderResponseDto>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var result = await _sut.GetByIdAsync(order.Id);
+
+        result.Id.Should().Be(order.Id);
+        _cache.Verify(c => c.SetAsync(order.Id, It.IsAny<OrderResponseDto>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task GetFilteredAsync_ShouldComposePagedResult_FromListAndCount()
+    {
+        var filter = new OrderFilterDto { Status = nameof(OrderStatus.Created), Page = 2, PageSize = 5 };
+        var orders = new[] { OrderFactory.CreateOrder(), OrderFactory.CreateOrder() };
+
+        _repository.Setup(r => r.GetListAsync(It.IsAny<OrderQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(orders);
+        _repository.Setup(r => r.CountAsync(It.IsAny<OrderQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(7);
+
+        var result = await _sut.GetFilteredAsync(filter);
+
+        result.Items.Should().HaveCount(2);
+        result.TotalCount.Should().Be(7);
+        result.Page.Should().Be(2);
+        result.PageSize.Should().Be(5);
+        result.TotalPages.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task GetFilteredAsync_WithInvalidPaging_ShouldThrowValidation()
+    {
+        var filter = new OrderFilterDto { Page = 0, PageSize = 5 };
+
+        var act = () => _sut.GetFilteredAsync(filter);
+
+        await act.Should().ThrowAsync<FluentValidation.ValidationException>();
+    }
+
+    [Fact]
+    public async Task GetStatusHistoryAsync_WhenExists_ShouldReturnMappedHistory()
+    {
+        var order = OrderFactory.CreateOrder();
+        _repository.Setup(r => r.GetByIdAsync(order.Id, It.IsAny<CancellationToken>())).ReturnsAsync(order);
+        _repository.Setup(r => r.GetStatusHistoryAsync(order.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(order.StatusHistory.ToList());
+
+        var result = await _sut.GetStatusHistoryAsync(order.Id);
+
+        result.Should().ContainSingle();
+        result.First().ToStatus.Should().Be(nameof(OrderStatus.Created));
+    }
+
+    [Fact]
+    public async Task GetStatusHistoryAsync_WhenOrderNotFound_ShouldThrowNotFound()
+    {
+        var id = Guid.NewGuid();
+        _repository.Setup(r => r.GetByIdAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync((Order?)null);
+
+        var act = () => _sut.GetStatusHistoryAsync(id);
 
         await act.Should().ThrowAsync<NotFoundException>();
     }

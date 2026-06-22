@@ -17,6 +17,7 @@
     <PackageReference Include="Testcontainers.PostgreSql" Version="3.10.0" />
     <PackageReference Include="Dapper" Version="2.1.66" />
     <PackageReference Include="FluentMigrator.Runner" Version="6.2.0" />
+    <PackageReference Include="coverlet.collector" Version="6.0.2" />
   </ItemGroup>
 
   <ItemGroup>

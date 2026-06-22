@@ -137,6 +137,56 @@ public class OrderLifecycleServiceTests
         await act.Should().ThrowAsync<BusinessRuleException>().WithMessage("*Unknown order status*");
     }
 
+    [Fact]
+    public async Task AssembleShipDeliver_ShouldAdvanceStatuses_AndPublishStatusEvents()
+    {
+        var order = OrderFactory.CreateOrder();
+        SetupGet(order);
+        await _sut.PayAsync(order.Id);
+
+        (await _sut.AssembleAsync(order.Id)).Status.Should().Be(nameof(OrderStatus.Assembling));
+        (await _sut.ShipAsync(order.Id)).Status.Should().Be(nameof(OrderStatus.Shipped));
+        (await _sut.DeliverAsync(order.Id)).Status.Should().Be(nameof(OrderStatus.Delivered));
+
+        // 4 перехода (pay/assemble/ship/deliver) → 4 события смены статуса.
+        _publisher.Verify(b => b.PublishAsync(It.IsAny<OrderStatusChangedEvent>(), It.IsAny<CancellationToken>()), Times.Exactly(4));
+    }
+
+    [Fact]
+    public async Task ChangeStatusAsync_WithValidTransition_ShouldApplyAndPersist()
+    {
+        var order = OrderFactory.CreateOrder();
+        SetupGet(order);
+
+        var result = await _sut.ChangeStatusAsync(order.Id, new ChangeStatusDto { Status = nameof(OrderStatus.Paid) });
+
+        result.Status.Should().Be(nameof(OrderStatus.Paid));
+        _repository.Verify(r => r.UpdateStatusAsync(order, It.IsAny<OrderStatusHistory>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ChangeStatusAsync_WithInvalidTransition_ShouldThrowDomainException()
+    {
+        var order = OrderFactory.CreateOrder();
+        SetupGet(order);
+
+        // Created → Delivered напрямую недопустимо.
+        var act = () => _sut.ChangeStatusAsync(order.Id, new ChangeStatusDto { Status = nameof(OrderStatus.Delivered) });
+
+        await act.Should().ThrowAsync<Domain.Exceptions.DomainException>();
+    }
+
+    [Fact]
+    public async Task PayAsync_WhenOrderNotFound_ShouldThrowNotFound()
+    {
+        var id = Guid.NewGuid();
+        _repository.Setup(r => r.GetByIdAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync((Order?)null);
+
+        var act = () => _sut.PayAsync(id);
+
+        await act.Should().ThrowAsync<NotFoundException>();
+    }
+
     private void SetupGet(Order order) =>
         _repository.Setup(r => r.GetByIdAsync(order.Id, It.IsAny<CancellationToken>())).ReturnsAsync(order);
 }
