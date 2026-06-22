@@ -45,7 +45,9 @@ public class OrderCreationService : IOrderCreationService
         await _validator.ValidateAndThrowAsync(dto, cancellationToken);
 
         var customer = new CustomerInfo(dto.Customer.FullName, dto.Customer.Email, dto.Customer.Phone, dto.Customer.ShippingAddress);
-        var currency = dto.Currency.ToUpperInvariant();
+        var currency = string.IsNullOrWhiteSpace(dto.Currency)
+            ? Money.DefaultCurrency
+            : dto.Currency.ToUpperInvariant();
 
         var orderItems = await BuildReservedItemsAsync(dto.Items, cancellationToken);
 

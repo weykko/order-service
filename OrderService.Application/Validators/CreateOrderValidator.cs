@@ -8,11 +8,17 @@ namespace OrderService.Application.Validators;
 /// </summary>
 public class CreateOrderValidator : AbstractValidator<CreateOrderDto>
 {
+    /// <summary>Поддерживаемые валюты заказа.</summary>
+    private static readonly string[] SupportedCurrencies = { "RUB", "USD" };
+
     public CreateOrderValidator()
     {
+        // Валюта необязательна: при отсутствии применяется значение по умолчанию (RUB).
+        // Если значение задано — оно должно входить в список поддерживаемых валют.
         RuleFor(x => x.Currency)
-            .NotEmpty().WithMessage("Currency is required")
-            .Length(3).WithMessage("Currency must be a 3-letter code");
+            .Must(BeASupportedCurrency)
+            .When(x => !string.IsNullOrWhiteSpace(x.Currency))
+            .WithMessage($"Currency must be one of: {string.Join(", ", SupportedCurrencies)}");
 
         RuleFor(x => x.Customer)
             .NotNull().WithMessage("Customer info is required")
@@ -30,6 +36,9 @@ public class CreateOrderValidator : AbstractValidator<CreateOrderDto>
                 .GreaterThan(0).WithMessage("Quantity must be positive");
         });
     }
+
+    private static bool BeASupportedCurrency(string? currency) =>
+        currency is not null && SupportedCurrencies.Contains(currency.ToUpperInvariant());
 }
 
 /// <summary>
