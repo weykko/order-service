@@ -31,7 +31,7 @@ public class OrderStateMachineTests
     }
 
     [Fact]
-    public void FullHappyPath_ShouldPassThroughAllStatuses()
+    public void FullHappyPath_ToReceived_ShouldPassThroughAllStatuses()
     {
         var order = OrderFactory.CreateOrder();
 
@@ -39,17 +39,32 @@ public class OrderStateMachineTests
         order.StartAssembling();
         order.Ship();
         order.Deliver();
+        order.Receive();
 
-        order.Status.Should().Be(OrderStatus.Delivered);
+        order.Status.Should().Be(OrderStatus.Received);
         order.StatusHistory.Select(h => h.ToStatus).Should().ContainInOrder(
-            OrderStatus.Created, OrderStatus.Paid, OrderStatus.Assembling, OrderStatus.Shipped, OrderStatus.Delivered);
+            OrderStatus.Created, OrderStatus.Paid, OrderStatus.Assembling,
+            OrderStatus.Shipped, OrderStatus.Delivered, OrderStatus.Received);
+    }
+
+    [Fact]
+    public void Delivered_CanBeReturned()
+    {
+        var order = OrderFactory.CreateOrder();
+        order.MarkAsPaid();
+        order.StartAssembling();
+        order.Ship();
+        order.Deliver();
+
+        order.Return("defective");
+
+        order.Status.Should().Be(OrderStatus.Returned);
     }
 
     [Theory]
     [InlineData(OrderStatus.Created)]
     [InlineData(OrderStatus.Paid)]
-    [InlineData(OrderStatus.Assembling)]
-    public void Cancel_ShouldBeAllowed_BeforeShipping(OrderStatus reachStatus)
+    public void Cancel_ShouldBeAllowed_BeforeAssembling(OrderStatus reachStatus)
     {
         var order = OrderFactory.CreateOrder();
         DriveTo(order, reachStatus);
@@ -60,12 +75,11 @@ public class OrderStateMachineTests
     }
 
     [Fact]
-    public void Cancel_AfterShipped_ShouldThrow()
+    public void Cancel_AfterAssembling_ShouldThrow()
     {
         var order = OrderFactory.CreateOrder();
         order.MarkAsPaid();
         order.StartAssembling();
-        order.Ship();
 
         var act = () => order.Cancel();
 

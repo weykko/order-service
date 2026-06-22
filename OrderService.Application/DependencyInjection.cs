@@ -16,7 +16,10 @@ public static class DependencyInjection
     {
         services.AddAutoMapper(cfg => cfg.AddMaps(typeof(OrderMappingProfile).Assembly));
         services.AddValidatorsFromAssemblyContaining<CreateOrderValidator>();
-        services.AddScoped<IOrderService, OrderManagementService>();
+
+        services.AddScoped<IOrderCreationService, OrderCreationService>();
+        services.AddScoped<IOrderQueryService, OrderQueryService>();
+        services.AddScoped<IOrderLifecycleService, OrderLifecycleService>();
         return services;
     }
 }

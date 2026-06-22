@@ -37,6 +37,11 @@ OrderService.Tests           // Unit + интеграционные тесты
 в `Application/Abstractions` (`IEventPublisher`, `IOrderCache`,
 `IProductCatalogClient`) и `Domain/Interfaces` (`IOrderRepository`).
 
+Сценарии работы с заказами разнесены по SRP на три сфокусированных сервиса:
+- `IOrderCreationService` / `OrderCreationService` — оформление заказа (резерв, расчёт суммы);
+- `IOrderQueryService` / `OrderQueryService` — чтение (по id с кешем, список, история);
+- `IOrderLifecycleService` / `OrderLifecycleService` — переходы статусов и возврат денег.
+
 Конфигурация выполняется в `Startup` (`ConfigureServices`/`Configure`), а `Program.cs`
 собирает хост через `Host.CreateDefaultBuilder().UseStartup<Startup>()` и применяет
 миграции расширением `RunMigrations()`. Каждый слой предоставляет DI-расширение
@@ -46,13 +51,21 @@ OrderService.Tests           // Unit + интеграционные тесты
 ## Жизненный цикл заказа (стейт-машина)
 
 ```
-Created ──▶ Paid ──▶ Assembling ──▶ Shipped ──▶ Delivered
-   │          │           │
-   └──────────┴───────────┴──────────▶ Cancelled
+Created ──▶ Paid ──▶ Assembling ──▶ Shipped ──▶ Delivered ──▶ Received
+   │          │                                      │
+   └──────────┘                                       └────────▶ Returned
+   │          │
+   └──────────┴──▶ Cancelled
 ```
 
-Отмена возможна до отгрузки (`Created`, `Paid`, `Assembling`). Все переходы
-валидируются в агрегате `Order` и фиксируются в таблице `order_status_history`.
+- **Отмена** (`Cancelled`) возможна только до отправки в сборку — из `Created` и `Paid`.
+  Если заказ уже оплачен, отмена влечёт **возврат денег**.
+- После доставки в ПВЗ заказ завершается одним из двух финальных статусов:
+  `Received` (получатель забрал) или `Returned` (произведён возврат → **возврат денег**).
+- Финальные статусы: `Received`, `Returned`, `Cancelled` — дальнейшие переходы запрещены.
+
+Все переходы валидируются стейт-машиной агрегата `Order` (строго по порядку) и
+фиксируются в таблице `order_status_history`.
 
 ## REST API
 
@@ -65,8 +78,10 @@ Created ──▶ Paid ──▶ Assembling ──▶ Shipped ──▶ Delivere
 | POST  | `/api/v1/orders/{id}/pay`            | Оплата (симуляция): Created → `Paid`        |
 | POST  | `/api/v1/orders/{id}/assemble`       | В сборку: Paid → `Assembling`            |
 | POST  | `/api/v1/orders/{id}/ship`           | В доставку: Assembling → `Shipped`        |
-| POST  | `/api/v1/orders/{id}/deliver`        | Доставлен: Shipped → `Delivered`         |
-| POST  | `/api/v1/orders/{id}/cancel`         | Отмена заказа → `Cancelled`              |
+| POST  | `/api/v1/orders/{id}/deliver`        | Доставлен в ПВЗ: Shipped → `Delivered`   |
+| POST  | `/api/v1/orders/{id}/receive`        | Получен: Delivered → `Received`          |
+| POST  | `/api/v1/orders/{id}/return`         | Возврат: Delivered → `Returned` (+возврат денег)|
+| POST  | `/api/v1/orders/{id}/cancel`         | Отмена (до сборки) → `Cancelled` (+возврат денег, если оплачен)|
 | POST  | `/api/v1/orders/{id}/status`         | Произвольный переход статуса            |
 
 ## Интеграция с ProductService
@@ -86,6 +101,7 @@ Created ──▶ Paid ──▶ Assembling ──▶ Shipped ──▶ Delivere
 - `ordercreated` — заказ создан;
 - `orderpaid` — заказ оплачен (**ProductService слушает и списывает резерв**);
 - `ordercancelled` — заказ отменён (для возврата резерва);
+- `orderrefunded` — произведён возврат денег (отмена оплаченного либо возврат доставленного);
 - `orderstatuschanged` — изменение статуса заказа.
 
 > **Ограничение интеграции.** На текущий момент ProductService не содержит

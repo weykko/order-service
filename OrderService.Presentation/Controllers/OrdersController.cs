@@ -5,14 +5,20 @@ using OrderService.Application.DTOs;
 namespace OrderService.Presentation.Controllers;
 
 /// <summary>
-/// REST API системы заказов: оформление, чтение, оплата, отмена и смена статусов.
+/// REST API системы заказов: оформление, чтение и управление жизненным циклом.
+/// Сценарии разнесены по сервисам (создание, чтение, переходы статусов) согласно SRP.
 /// Валидация входных данных выполняется в прикладном слое (use-case).
 /// </summary>
 [ApiController]
 [Route("api/v1/orders")]
-public class OrdersController(IOrderService orderService) : ControllerBase
+public class OrdersController(
+    IOrderCreationService creationService,
+    IOrderQueryService queryService,
+    IOrderLifecycleService lifecycleService) : ControllerBase
 {
-    private readonly IOrderService _orderService = orderService;
+    private readonly IOrderCreationService _creationService = creationService;
+    private readonly IOrderQueryService _queryService = queryService;
+    private readonly IOrderLifecycleService _lifecycleService = lifecycleService;
 
     [HttpGet]
     [ProducesResponseType(typeof(PagedResult<OrderResponseDto>), StatusCodes.Status200OK)]
@@ -20,7 +26,7 @@ public class OrdersController(IOrderService orderService) : ControllerBase
         [FromQuery] OrderFilterDto filter,
         CancellationToken cancellationToken)
     {
-        var result = await _orderService.GetFilteredAsync(filter, cancellationToken);
+        var result = await _queryService.GetFilteredAsync(filter, cancellationToken);
         return Ok(result);
     }
 
@@ -29,7 +35,7 @@ public class OrdersController(IOrderService orderService) : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<OrderResponseDto>> GetOrder(Guid id, CancellationToken cancellationToken)
     {
-        var order = await _orderService.GetByIdAsync(id, cancellationToken);
+        var order = await _queryService.GetByIdAsync(id, cancellationToken);
         return Ok(order);
     }
 
@@ -38,7 +44,7 @@ public class OrdersController(IOrderService orderService) : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<IReadOnlyCollection<OrderStatusHistoryDto>>> GetHistory(Guid id, CancellationToken cancellationToken)
     {
-        var history = await _orderService.GetStatusHistoryAsync(id, cancellationToken);
+        var history = await _queryService.GetStatusHistoryAsync(id, cancellationToken);
         return Ok(history);
     }
 
@@ -50,7 +56,7 @@ public class OrdersController(IOrderService orderService) : ControllerBase
         [FromBody] CreateOrderDto dto,
         CancellationToken cancellationToken)
     {
-        var order = await _orderService.CreateAsync(dto, cancellationToken);
+        var order = await _creationService.CreateAsync(dto, cancellationToken);
         return CreatedAtAction(nameof(GetOrder), new { id = order.Id }, order);
     }
 
@@ -60,7 +66,7 @@ public class OrdersController(IOrderService orderService) : ControllerBase
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<ActionResult<OrderResponseDto>> Pay(Guid id, CancellationToken cancellationToken)
     {
-        var order = await _orderService.PayAsync(id, cancellationToken);
+        var order = await _lifecycleService.PayAsync(id, cancellationToken);
         return Ok(order);
     }
 
@@ -70,7 +76,7 @@ public class OrdersController(IOrderService orderService) : ControllerBase
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<ActionResult<OrderResponseDto>> Assemble(Guid id, CancellationToken cancellationToken)
     {
-        var order = await _orderService.AssembleAsync(id, cancellationToken);
+        var order = await _lifecycleService.AssembleAsync(id, cancellationToken);
         return Ok(order);
     }
 
@@ -80,7 +86,7 @@ public class OrdersController(IOrderService orderService) : ControllerBase
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<ActionResult<OrderResponseDto>> Ship(Guid id, CancellationToken cancellationToken)
     {
-        var order = await _orderService.ShipAsync(id, cancellationToken);
+        var order = await _lifecycleService.ShipAsync(id, cancellationToken);
         return Ok(order);
     }
 
@@ -90,7 +96,30 @@ public class OrdersController(IOrderService orderService) : ControllerBase
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<ActionResult<OrderResponseDto>> Deliver(Guid id, CancellationToken cancellationToken)
     {
-        var order = await _orderService.DeliverAsync(id, cancellationToken);
+        var order = await _lifecycleService.DeliverAsync(id, cancellationToken);
+        return Ok(order);
+    }
+
+    [HttpPost("{id:guid}/receive")]
+    [ProducesResponseType(typeof(OrderResponseDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<OrderResponseDto>> Receive(Guid id, CancellationToken cancellationToken)
+    {
+        var order = await _lifecycleService.ReceiveAsync(id, cancellationToken);
+        return Ok(order);
+    }
+
+    [HttpPost("{id:guid}/return")]
+    [ProducesResponseType(typeof(OrderResponseDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<OrderResponseDto>> Return(
+        Guid id,
+        [FromBody] ReturnOrderRequest? request,
+        CancellationToken cancellationToken)
+    {
+        var order = await _lifecycleService.ReturnAsync(id, request?.Reason, cancellationToken);
         return Ok(order);
     }
 
@@ -103,7 +132,7 @@ public class OrdersController(IOrderService orderService) : ControllerBase
         [FromBody] CancelOrderRequest? request,
         CancellationToken cancellationToken)
     {
-        var order = await _orderService.CancelAsync(id, request?.Reason, cancellationToken);
+        var order = await _lifecycleService.CancelAsync(id, request?.Reason, cancellationToken);
         return Ok(order);
     }
 
@@ -117,12 +146,13 @@ public class OrdersController(IOrderService orderService) : ControllerBase
         [FromBody] ChangeStatusDto dto,
         CancellationToken cancellationToken)
     {
-        var order = await _orderService.ChangeStatusAsync(id, dto, cancellationToken);
+        var order = await _lifecycleService.ChangeStatusAsync(id, dto, cancellationToken);
         return Ok(order);
     }
 }
 
-/// <summary>
-/// Тело запроса на отмену заказа.
-/// </summary>
+/// <summary>Тело запроса на отмену заказа.</summary>
 public record CancelOrderRequest(string? Reason);
+
+/// <summary>Тело запроса на возврат заказа.</summary>
+public record ReturnOrderRequest(string? Reason);

@@ -2,8 +2,9 @@
 
 /// <summary>
 /// Жизненный цикл заказа.
-/// Created -> Paid -> Assembling -> Shipped -> Delivered,
-/// либо отмена (Cancelled) до момента отгрузки.
+/// Created -> Paid -> Assembling -> Shipped -> Delivered -> Received | Returned.
+/// Отмена (Cancelled) возможна только до отправки в сборку (Created, Paid).
+/// Финальные статусы: Received, Returned, Cancelled.
 /// </summary>
 public enum OrderStatus
 {
@@ -12,5 +13,7 @@ public enum OrderStatus
     Assembling = 3,
     Shipped = 4,
     Delivered = 5,
-    Cancelled = 6
+    Cancelled = 6,
+    Received = 7,
+    Returned = 8
 }

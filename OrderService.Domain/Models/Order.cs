@@ -23,11 +23,20 @@ public class Order : BaseEntity
         {
             [OrderStatus.Created] = new[] { OrderStatus.Paid, OrderStatus.Cancelled },
             [OrderStatus.Paid] = new[] { OrderStatus.Assembling, OrderStatus.Cancelled },
-            [OrderStatus.Assembling] = new[] { OrderStatus.Shipped, OrderStatus.Cancelled },
+            [OrderStatus.Assembling] = new[] { OrderStatus.Shipped },
             [OrderStatus.Shipped] = new[] { OrderStatus.Delivered },
-            [OrderStatus.Delivered] = Array.Empty<OrderStatus>(),
-            [OrderStatus.Cancelled] = Array.Empty<OrderStatus>()
+            [OrderStatus.Delivered] = new[] { OrderStatus.Received, OrderStatus.Returned },
+            [OrderStatus.Cancelled] = Array.Empty<OrderStatus>(),
+            [OrderStatus.Received] = Array.Empty<OrderStatus>(),
+            [OrderStatus.Returned] = Array.Empty<OrderStatus>()
         };
+
+    /// <summary>
+    /// Статусы, в которых заказ уже оплачен, поэтому переход в Cancelled/Returned
+    /// влечёт возврат денежных средств покупателю.
+    /// </summary>
+    private static readonly IReadOnlySet<OrderStatus> PaidStatuses =
+        new HashSet<OrderStatus> { OrderStatus.Paid, OrderStatus.Assembling, OrderStatus.Shipped, OrderStatus.Delivered };
 
     public OrderStatus Status { get; private set; }
     public CustomerInfo Customer { get; private set; }
@@ -77,11 +86,23 @@ public class Order : BaseEntity
     /// <summary>Передаёт заказ в доставку.</summary>
     public void Ship(string? comment = null) => ChangeStatus(OrderStatus.Shipped, comment);
 
-    /// <summary>Помечает заказ доставленным.</summary>
+    /// <summary>Помечает заказ доставленным в ПВЗ.</summary>
     public void Deliver(string? comment = null) => ChangeStatus(OrderStatus.Delivered, comment);
 
-    /// <summary>Отменяет заказ, если это допустимо текущим статусом.</summary>
+    /// <summary>Получатель забрал заказ из ПВЗ — заказ завершён.</summary>
+    public void Receive(string? comment = null) => ChangeStatus(OrderStatus.Received, comment);
+
+    /// <summary>Произведён возврат заказа — заказ завершён с возвратом денег.</summary>
+    public void Return(string? comment = null) => ChangeStatus(OrderStatus.Returned, comment);
+
+    /// <summary>Отменяет заказ, если это допустимо текущим статусом (до отправки в сборку).</summary>
     public void Cancel(string? comment = null) => ChangeStatus(OrderStatus.Cancelled, comment);
+
+    /// <summary>
+    /// Возвращает true, если в указанном статусе заказ уже оплачен,
+    /// то есть переход в Cancelled/Returned из него влечёт возврат денег.
+    /// </summary>
+    public static bool IsPaidStatus(OrderStatus status) => PaidStatuses.Contains(status);
 
     /// <summary>
     /// Универсальный переход в произвольный целевой статус с валидацией по стейт-машине.
