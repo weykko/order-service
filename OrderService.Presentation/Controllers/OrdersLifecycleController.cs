@@ -5,60 +5,14 @@ using OrderService.Application.DTOs;
 namespace OrderService.Presentation.Controllers;
 
 /// <summary>
-/// REST API системы заказов: оформление, чтение и управление жизненным циклом.
-/// Сценарии разнесены по сервисам (создание, чтение, переходы статусов) согласно SRP.
-/// Валидация входных данных выполняется в прикладном слое (use-case).
+/// Управление жизненным циклом заказа: оплата, сборка, доставка, получение,
+/// возврат, отмена и произвольная смена статуса.
 /// </summary>
 [ApiController]
 [Route("api/v1/orders")]
-public class OrdersController(
-    IOrderCreationService creationService,
-    IOrderQueryService queryService,
-    IOrderLifecycleService lifecycleService) : ControllerBase
+public class OrdersLifecycleController(IOrderLifecycleService lifecycleService) : ControllerBase
 {
-    private readonly IOrderCreationService _creationService = creationService;
-    private readonly IOrderQueryService _queryService = queryService;
     private readonly IOrderLifecycleService _lifecycleService = lifecycleService;
-
-    [HttpGet]
-    [ProducesResponseType(typeof(PagedResult<OrderResponseDto>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<PagedResult<OrderResponseDto>>> GetOrders(
-        [FromQuery] OrderFilterDto filter,
-        CancellationToken cancellationToken)
-    {
-        var result = await _queryService.GetFilteredAsync(filter, cancellationToken);
-        return Ok(result);
-    }
-
-    [HttpGet("{id:guid}")]
-    [ProducesResponseType(typeof(OrderResponseDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<OrderResponseDto>> GetOrder(Guid id, CancellationToken cancellationToken)
-    {
-        var order = await _queryService.GetByIdAsync(id, cancellationToken);
-        return Ok(order);
-    }
-
-    [HttpGet("{id:guid}/history")]
-    [ProducesResponseType(typeof(IReadOnlyCollection<OrderStatusHistoryDto>), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<IReadOnlyCollection<OrderStatusHistoryDto>>> GetHistory(Guid id, CancellationToken cancellationToken)
-    {
-        var history = await _queryService.GetStatusHistoryAsync(id, cancellationToken);
-        return Ok(history);
-    }
-
-    [HttpPost]
-    [ProducesResponseType(typeof(OrderResponseDto), StatusCodes.Status201Created)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status409Conflict)]
-    public async Task<ActionResult<OrderResponseDto>> CreateOrder(
-        [FromBody] CreateOrderDto dto,
-        CancellationToken cancellationToken)
-    {
-        var order = await _creationService.CreateAsync(dto, cancellationToken);
-        return CreatedAtAction(nameof(GetOrder), new { id = order.Id }, order);
-    }
 
     [HttpPost("{id:guid}/pay")]
     [ProducesResponseType(typeof(OrderResponseDto), StatusCodes.Status200OK)]
@@ -150,9 +104,3 @@ public class OrdersController(
         return Ok(order);
     }
 }
-
-/// <summary>Тело запроса на отмену заказа.</summary>
-public record CancelOrderRequest(string? Reason);
-
-/// <summary>Тело запроса на возврат заказа.</summary>
-public record ReturnOrderRequest(string? Reason);
