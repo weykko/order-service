@@ -268,26 +268,3 @@ dotnet test
   > Для запуска интеграционных тестов требуется установленный и запущенный Docker.
 
 ---
-
-## Журнал выполнения
-
-### Реализовано
-- [x] Доменный слой: агрегат `Order` со стейт-машиной, `OrderItem`,
-      `OrderStatusHistory`, value objects `Money` и `CustomerInfo`, `IOrderRepository`.
-- [x] Прикладной слой: `IOrderService` / `OrderManagementService`, DTO, порты,
-      доменные события, валидаторы (FluentValidation), профиль AutoMapper.
-- [x] Инфраструктура: `OrderRepository` (Dapper, транзакционная запись),
-      миграции (FluentMigrator), двухуровневый кеш (`RedisOrderCache`),
-      шина событий (`KafkaMessageBus`), HTTP-клиент `ProductCatalogClient`.
-- [x] Presentation: `OrdersController`, `ErrorHandlingMiddleware`, `Startup`,
-      авто-применение миграций, CORS, Swagger.
-- [x] Docker: `Dockerfile` (multi-stage) и корневой `compose.yaml`
-      (PostgreSQL + Redis + Kafka + сервис).
-- [x] Тесты: unit (стейт-машина, сервис) и интеграционные (репозиторий на Testcontainers).
-- [x] Интеграция с ProductService: HTTP-резерв + публикация событий в Kafka
-      по совместимому контракту топиков.
-
-### Известные ограничения / планы
-- [ ] Возврат резерва при отмене заказа на стороне ProductService
-      (требуется консьюмер `ordercancelled`).
-- [ ] Аутентификация/авторизация пользователей (вне рамок текущего ТЗ).
