@@ -13,7 +13,9 @@ public class Startup
 {
     private const string CorsPolicyName = "AllowFrontend";
 
-    private static readonly string[] FrontendOrigins =
+    // Origin'ы фронтенда по умолчанию (локальная разработка). Дополнительные
+    // origin'ы задаются через конфиг "Cors:AllowedOrigins" (например, адрес сервера).
+    private static readonly string[] DefaultFrontendOrigins =
     {
         "http://localhost:3000",
         "http://localhost:5173"
@@ -39,8 +41,11 @@ public class Startup
         services.AddEndpointsApiExplorer();
         services.AddSwaggerGen();
 
+        var allowedOrigins = _configuration.GetSection("Cors:AllowedOrigins").Get<string[]>();
+        var origins = allowedOrigins is { Length: > 0 } ? allowedOrigins : DefaultFrontendOrigins;
+
         services.AddCors(options => options.AddPolicy(CorsPolicyName, policy =>
-            policy.WithOrigins(FrontendOrigins)
+            policy.WithOrigins(origins)
                 .AllowAnyMethod()
                 .AllowAnyHeader()));
 
