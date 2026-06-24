@@ -10,12 +10,12 @@
 
 | Категория            | Технология                                   |
 |----------------------|----------------------------------------------|
-| Платформа            | .NET 9 / ASP.NET Core (REST для фронта)         |
+| Платформа            | .NET 9 / ASP.NET Core (REST для фронта)      |
 | База данных          | PostgreSQL                                   |
 | Доступ к данным      | Dapper (чистый SQL, без ORM)                 |
 | Миграции             | FluentMigrator                               |
 | Валидация            | FluentValidation                             |
-| Межсервисный sync    | gRPC (Grpc.Net.Client / Grpc.AspNetCore)     |
+| Межсервисный sync    | gRPC (Grpc.Net.ClientFactory)                |
 | Кеширование          | Redis + in-memory (двухуровневый кеш)        |
 | Брокер сообщений     | Apache Kafka (Confluent.Kafka)               |
 | Маппинг              | AutoMapper                                   |
@@ -37,7 +37,8 @@ OrderService.Tests           // Unit + интеграционные тесты
 в `Application/Abstractions` (`IEventPublisher`, `IOrderCache`,
 `IProductCatalogClient`) и `Domain/Interfaces` (`IOrderRepository`).
 
-Сценарии работы с заказами разнесены по SRP на три сфокусированных сервиса:
+Сценарии работы с заказами разнесены по SRP на три сфокусированных сервиса,
+у каждого — свой контроллер:
 - `IOrderCreationService` / `OrderCreationService` — оформление заказа (резерв, расчёт суммы);
 - `IOrderQueryService` / `OrderQueryService` — чтение (по id с кешем, список, история);
 - `IOrderLifecycleService` / `OrderLifecycleService` — переходы статусов и возврат денег.
@@ -52,20 +53,20 @@ OrderService.Tests           // Unit + интеграционные тесты
 
 ```
 Created ──▶ Paid ──▶ Assembling ──▶ Shipped ──▶ Delivered ──▶ Received
-   │          │                                      │
-   └──────────┘                                       └────────▶ Returned
-   │          │
-   └──────────┴──▶ Cancelled
+   │                                                │
+   │                                                └────────▶ Returned
+   │
+   └──▶ Cancelled
 ```
 
-- **Отмена** (`Cancelled`) возможна только до отправки в сборку — из `Created` и `Paid`.
-  Если заказ уже оплачен, отмена влечёт **возврат денег**.
+- **Отмена** (`Cancelled`) возможна **только до оплаты** — из статуса `Created`.
+  После оплаты товар списывается со склада, поэтому отмена запрещена.
 - После доставки в ПВЗ заказ завершается одним из двух финальных статусов:
   `Received` (получатель забрал) или `Returned` (произведён возврат → **возврат денег**).
 - Финальные статусы: `Received`, `Returned`, `Cancelled` — дальнейшие переходы запрещены.
 
-Все переходы валидируются стейт-машиной агрегата `Order` (строго по порядку) и
-фиксируются в таблице `order_status_history`.
+Все переходы валидируются стейт-машиной агрегата `Order` (строго по порядку, без
+«перепрыгивания») и фиксируются в таблице `order_status_history`.
 
 ## REST API
 
@@ -75,40 +76,49 @@ Created ──▶ Paid ──▶ Assembling ──▶ Shipped ──▶ Delivere
 | GET   | `/api/v1/orders`                     | Список заказов (фильтр, пагинация)      |
 | GET   | `/api/v1/orders/{id}`                | Заказ по id (с кешем)                   |
 | GET   | `/api/v1/orders/{id}/history`        | История статусов заказа                 |
-| POST  | `/api/v1/orders/{id}/pay`            | Оплата (симуляция): Created → `Paid`        |
-| POST  | `/api/v1/orders/{id}/assemble`       | В сборку: Paid → `Assembling`            |
-| POST  | `/api/v1/orders/{id}/ship`           | В доставку: Assembling → `Shipped`        |
-| POST  | `/api/v1/orders/{id}/deliver`        | Доставлен в ПВЗ: Shipped → `Delivered`   |
-| POST  | `/api/v1/orders/{id}/receive`        | Получен: Delivered → `Received`          |
+| POST  | `/api/v1/orders/{id}/pay`            | Оплата (симуляция): Created → `Paid`    |
+| POST  | `/api/v1/orders/{id}/assemble`       | В сборку: Paid → `Assembling`           |
+| POST  | `/api/v1/orders/{id}/ship`           | В доставку: Assembling → `Shipped`      |
+| POST  | `/api/v1/orders/{id}/deliver`        | Доставлен в ПВЗ: Shipped → `Delivered`  |
+| POST  | `/api/v1/orders/{id}/receive`        | Получен: Delivered → `Received`         |
 | POST  | `/api/v1/orders/{id}/return`         | Возврат: Delivered → `Returned` (+возврат денег)|
-| POST  | `/api/v1/orders/{id}/cancel`         | Отмена (до сборки) → `Cancelled` (+возврат денег, если оплачен)|
+| POST  | `/api/v1/orders/{id}/cancel`         | Отмена (только до оплаты) → `Cancelled` (+возврат резерва)|
 | POST  | `/api/v1/orders/{id}/status`         | Произвольный переход статуса            |
+
+Контроллеры разнесены по зонам ответственности: `OrdersCreationController`,
+`OrdersQueryController`, `OrdersLifecycleController` (общий маршрут `api/v1/orders`).
+
+### Поле `currency`
+
+Валюта необязательна — при отсутствии применяется значение по умолчанию `RUB`.
+Допустимые значения проверяются на уровне валидации (`CreateOrderValidator`):
+поддерживаются `RUB` и `USD`. Цена позиций берётся из ProductService, а не от клиента.
 
 ## Интеграция с ProductService
 
-**Синхронно (gRPC, исходящие вызовы).** Контракт описан в `product_catalog.proto`
-(пакет `productcatalog`, сервис `ProductCatalog`), общий для обоих сервисов:
-- `GetProduct(product_id)` — получение актуальной цены и наличия товара;
-- `ReserveStock(product_id, quantity)` — резервирование товара при оформлении заказа.
+**Синхронно (gRPC, исходящие вызовы).** ProductService предоставляет два gRPC-сервиса,
+их контракты зеркалируются у нас в `Infrastructure/Protos`:
+- `product.ProductServiceGrpc` → `GetProduct(id)` — актуальная цена и наличие товара;
+- `stock.StockServiceGrpc` → `ReserveStock(product_id, quantity)` — резерв товара при оформлении.
 
-> gRPC работает поверх HTTP/2. ProductService слушает один порт в режиме
-> `Http1AndHttp2` (REST для фронта + gRPC для OrderService); адрес gRPC задаётся
-> настройкой `ProductCatalog:GrpcAddress`.
+> gRPC работает поверх HTTP/2. ProductService слушает gRPC на отдельном порту
+> (HTTP/2), REST для фронта — на другом (HTTP/1.1). Адрес gRPC задаётся настройкой
+> `ProductCatalog:GrpcAddress` (на сервере — `http://product-service-api:5002`).
+> Отсутствие товара клиент распознаёт по gRPC-статусу `NotFound` (и `Unknown/Internal`
+> с признаком «not found») и возвращает наружу корректный `404`.
 
 **Асинхронно (Kafka, публикуемые события).** Имя топика = имя типа события без
-суффикса `Event` в нижнем регистре, тело — JSON в camelCase (контракт совместим
+суффикса `Event` в нижнем регистре, тело — JSON в camelCase (контракт совпадает
 с консьюмерами ProductService):
 - `ordercreated` — заказ создан;
 - `orderpaid` — заказ оплачен (**ProductService слушает и списывает резерв**);
-- `ordercancelled` — заказ отменён (для возврата резерва);
-- `orderrefunded` — произведён возврат денег (отмена оплаченного либо возврат доставленного);
+- `ordercancelled` — заказ отменён (**ProductService слушает и возвращает резерв на склад**);
+- `orderrefunded` — произведён возврат денег (возврат доставленного заказа);
 - `orderstatuschanged` — изменение статуса заказа.
 
-> **Ограничение интеграции.** На текущий момент ProductService не содержит
-> консьюмера события `ordercancelled`, поэтому автоматический возврат
-> зарезервированного товара на склад при отмене заказа не выполняется.
-> Событие публикуется заранее (forward-compatible) — после добавления
-> обработчика на стороне ProductService возврат заработает без изменений в OrderService.
+ProductService содержит консьюмеры `OrderPaidEventHandler` (списание резерва) и
+`OrderCancelledEventHandler` (возврат резерва), поэтому обе цепочки замыкаются
+end-to-end.
 
 ## Диаграммы взаимодействия микросервисов
 
@@ -129,7 +139,7 @@ flowchart LR
 
     subgraph PS["ProductService"]
         PAPI["REST API\n/api/v1/products"]
-        PGRPC["gRPC\nProductCatalog"]
+        PGRPC["gRPC\nProductServiceGrpc + StockServiceGrpc"]
         PPG[("PostgreSQL\nproducts, stocks")]
     end
 
@@ -143,11 +153,11 @@ flowchart LR
     OAPI --- ORD
     PAPI --- PPG
 
-    OAPI -->|"publish: ordercreated,\norderpaid, ordercancelled,\norderstatuschanged"| KAFKA
-    KAFKA -->|"consume: orderpaid"| PAPI
+    OAPI -->|"publish: ordercreated, orderpaid,\nordercancelled, orderrefunded,\norderstatuschanged"| KAFKA
+    KAFKA -->|"consume: orderpaid,\nordercancelled"| PAPI
 ```
 
-### Сценарий 1. Оформление заказа (синхронно, HTTP)
+### Сценарий 1. Оформление заказа (синхронно, gRPC)
 
 При создании заказа требуется немедленный ответ: есть ли товар и удалось ли
 зарезервировать остаток. Цена берётся из каталога, а не от клиента.
@@ -161,18 +171,18 @@ sequenceDiagram
 
     Client->>OS: POST /api/v1/orders
     loop по каждой позиции
-        OS->>PS: gRPC GetProduct(productId)
+        OS->>PS: gRPC GetProduct(id)
         alt товар не найден
-            PS-->>OS: ProductReply { found = false }
+            PS-->>OS: RpcException NotFound
             OS-->>Client: 404 (NotFoundException)
         else товар найден
-            PS-->>OS: ProductReply (цена, наличие)
+            PS-->>OS: ProductResponse (цена, наличие)
             OS->>PS: gRPC ReserveStock(productId, quantity)
             alt остатка не хватает
-                PS-->>OS: ReserveStockReply { reserved = false }
+                PS-->>OS: ReserveStockResponse { success = false }
                 OS-->>Client: 409 (BusinessRuleException)
             else зарезервировано
-                PS-->>OS: ReserveStockReply { reserved = true }
+                PS-->>OS: ReserveStockResponse { success = true }
             end
         end
     end
@@ -205,6 +215,9 @@ sequenceDiagram
 
 ### Сценарий 3. Отмена заказа (асинхронно, Kafka)
 
+Отмена возможна только до оплаты (товар ещё не списан), поэтому возврата денег
+не требуется — только возврат зарезервированного товара на склад.
+
 ```mermaid
 sequenceDiagram
     actor Client as Клиент
@@ -213,19 +226,21 @@ sequenceDiagram
     participant PS as ProductService
 
     Client->>OS: POST /api/v1/orders/{id}/cancel
-    OS->>OS: Order: → Cancelled (если переход допустим)
+    OS->>OS: Order: Created → Cancelled (иначе 422)
     OS->>K: publish OrderCancelledEvent {orderId, items}
     OS-->>Client: 200 OK (статус Cancelled)
-    Note over K,PS: консьюмер на стороне ProductService\nещё не реализован (возврат резерва — план)
+
+    K-->>PS: consume OrderCancelledEvent
+    PS->>PS: CancelReservation: reserved -= N (возврат резерва)
 ```
 
 ### Распределение ответственности
 
-| Действие         | Канал                       | Эффект на складе                       |
-|------------------|-----------------------------|----------------------------------------|
-| Создание заказа  | HTTP (sync)                 | `reserved += N` (резерв)               |
-| Оплата заказа    | Kafka `orderpaid` (async)   | `quantity -= N, reserved -= N` (списание)|
-| Отмена заказа    | Kafka `ordercancelled` (async)| возврат резерва (нужен консьюмер)     |
+| Действие         | Канал                          | Эффект на складе                        |
+|------------------|--------------------------------|-----------------------------------------|
+| Создание заказа  | gRPC (sync)                    | `reserved += N` (резерв)                |
+| Оплата заказа    | Kafka `orderpaid` (async)      | `quantity -= N, reserved -= N` (списание)|
+| Отмена заказа    | Kafka `ordercancelled` (async) | `reserved -= N` (возврат резерва)       |
 
 ## Схема БД
 
@@ -235,25 +250,43 @@ sequenceDiagram
 
 ## Запуск
 
-### Через Docker Compose
+### Локальный стенд (оба сервиса)
+
+`docker-compose.local.yml` поднимает общую инфраструктуру и оба микросервиса
+(локальная gRPC-версия ProductService + OrderService) в одной сети:
 
 ```bash
-docker compose up --build
+docker compose -f docker-compose.local.yml up -d --build
 ```
 
-Поднимаются: PostgreSQL, Redis, Zookeeper, Kafka и сам сервис.
-API доступно на `http://localhost:8081` (Swagger в режиме Development).
-Миграции применяются автоматически при старте приложения.
+### Серверный стек
 
-### Локально
+`docker-compose.remote.yaml` — стек для сервера: оба API, фронтенд, две БД
+(`product-postgres`, `order-postgres`), Redis, Kafka (+ Kafka UI) и init-контейнер
+`kafka-init`, который заранее создаёт нужные топики. Учётные данные PostgreSQL
+вынесены в `.env` (см. `.env.example`) — единый источник для БД и строк подключения:
+
+```bash
+cp .env.example .env   # при необходимости поменять пароль
+docker compose -f docker-compose.remote.yaml up -d
+```
+
+> Kafka и Zookeeper используют постоянные volume, поэтому топики и сообщения
+> переживают перезапуск стека. БД также на постоянных volume; при смене
+> `POSTGRES_PASSWORD` на уже существующем томе требуется однократное пересоздание
+> тома (иначе Postgres вернёт `28P01: password authentication failed`).
+
+### Локально (только OrderService)
 
 ```bash
 # Поднять инфраструктуру (postgres/redis/kafka), затем:
-dotnet run --project OrderService
+dotnet run --project OrderService.Presentation
 ```
 
-Конфигурация — в `appsettings.json` / `appsettings.Development.json`:
-строки подключения PostgreSQL и Redis, настройки Kafka и базовый URL ProductService.
+Конфигурация — в `appsettings.json` / `appsettings.Development.json`: строки
+подключения PostgreSQL и Redis, настройки Kafka, gRPC-адрес ProductService
+(`ProductCatalog:GrpcAddress`) и список разрешённых CORS-origin'ов
+(`Cors:AllowedOrigins`). Миграции применяются автоматически при старте приложения.
 
 ## Тесты
 
