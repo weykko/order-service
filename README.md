@@ -141,6 +141,7 @@ flowchart LR
         PAPI["REST API\n/api/v1/products"]
         PGRPC["gRPC\nProductServiceGrpc + StockServiceGrpc"]
         PPG[("PostgreSQL\nproducts, stocks")]
+        PRD[("Redis\nкеш товаров")]
     end
 
     KAFKA[["Apache Kafka"]]
@@ -152,9 +153,11 @@ flowchart LR
     OAPI --- OPG
     OAPI --- ORD
     PAPI --- PPG
+    PAPI --- PRD
 
     OAPI -->|"publish: ordercreated, orderpaid,\nordercancelled, orderrefunded,\norderstatuschanged"| KAFKA
     KAFKA -->|"consume: orderpaid,\nordercancelled"| PAPI
+    PAPI -->|"publish: productcreated,\nstockreserved, stockcommitted"| KAFKA
 ```
 
 ### Сценарий 1. Оформление заказа (синхронно, gRPC)
