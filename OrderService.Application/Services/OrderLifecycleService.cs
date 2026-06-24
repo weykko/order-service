@@ -62,7 +62,7 @@ public class OrderLifecycleService : IOrderLifecycleService
         TransitionAsync(
             id,
             order => order.Cancel(reason ?? "Cancelled by request"),
-            (order, previous, ct) => OnOrderCancelledAsync(order, previous, reason, ct),
+            (order, _, ct) => PublishCancelledAsync(order, reason, ct),
             cancellationToken);
 
     public Task<OrderResponseDto> ChangeStatusAsync(Guid id, ChangeStatusDto dto, CancellationToken cancellationToken = default)
@@ -102,13 +102,12 @@ public class OrderLifecycleService : IOrderLifecycleService
     }
 
     /// <summary>
-    /// Побочные действия при отмене заказа: публикация события отмены для возврата
-    /// зарезервированного товара на склад (его слушает ProductService) и возврат денег,
-    /// если заказ был оплачен.
+    /// Публикует событие отмены для возврата зарезервированного товара на склад
+    /// (его слушает ProductService). Возврат денег не требуется: отмена возможна
+    /// только до оплаты (из статуса Created).
     /// </summary>
-    private async Task OnOrderCancelledAsync(Order order, OrderStatus previousStatus, string? reason, CancellationToken cancellationToken)
-    {
-        await _eventPublisher.PublishAsync(new OrderCancelledEvent
+    private Task PublishCancelledAsync(Order order, string? reason, CancellationToken cancellationToken) =>
+        _eventPublisher.PublishAsync(new OrderCancelledEvent
         {
             OrderId = order.Id,
             Reason = reason,
@@ -119,9 +118,6 @@ public class OrderLifecycleService : IOrderLifecycleService
                 Quantity = i.Quantity
             }).ToList()
         }, cancellationToken);
-
-        await RefundIfPaidAsync(order, previousStatus, reason, cancellationToken);
-    }
 
     private Task PublishPaidAsync(Order order, OrderStatus previous, CancellationToken cancellationToken) =>
         _eventPublisher.PublishAsync(new OrderPaidEvent
@@ -138,7 +134,7 @@ public class OrderLifecycleService : IOrderLifecycleService
 
     /// <summary>
     /// Публикует событие возврата денег, если заказ до перехода был в оплаченном состоянии.
-    /// Покрывает отмену оплаченного заказа и возврат доставленного.
+    /// Используется при возврате доставленного заказа (Returned).
     /// </summary>
     private async Task RefundIfPaidAsync(Order order, OrderStatus previousStatus, string? reason, CancellationToken cancellationToken)
     {

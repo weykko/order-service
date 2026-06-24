@@ -22,7 +22,7 @@ public class Order : BaseEntity
         new Dictionary<OrderStatus, OrderStatus[]>
         {
             [OrderStatus.Created] = new[] { OrderStatus.Paid, OrderStatus.Cancelled },
-            [OrderStatus.Paid] = new[] { OrderStatus.Assembling, OrderStatus.Cancelled },
+            [OrderStatus.Paid] = new[] { OrderStatus.Assembling },
             [OrderStatus.Assembling] = new[] { OrderStatus.Shipped },
             [OrderStatus.Shipped] = new[] { OrderStatus.Delivered },
             [OrderStatus.Delivered] = new[] { OrderStatus.Received, OrderStatus.Returned },
@@ -32,7 +32,7 @@ public class Order : BaseEntity
         };
 
     /// <summary>
-    /// Статусы, в которых заказ уже оплачен, поэтому переход в Cancelled/Returned
+    /// Статусы, в которых заказ уже оплачен, поэтому переход в Returned
     /// влечёт возврат денежных средств покупателю.
     /// </summary>
     private static readonly IReadOnlySet<OrderStatus> PaidStatuses =
@@ -95,7 +95,8 @@ public class Order : BaseEntity
     /// <summary>Произведён возврат заказа — заказ завершён с возвратом денег.</summary>
     public void Return(string? comment = null) => ChangeStatus(OrderStatus.Returned, comment);
 
-    /// <summary>Отменяет заказ, если это допустимо текущим статусом (до отправки в сборку).</summary>
+    /// <summary>Отменяет заказ. Допустимо только до оплаты (из статуса Created),
+    /// так как после оплаты товар списывается со склада.</summary>
     public void Cancel(string? comment = null) => ChangeStatus(OrderStatus.Cancelled, comment);
 
     /// <summary>

@@ -75,12 +75,11 @@ public class OrderLifecycleServiceTests
     }
 
     [Fact]
-    public async Task CancelAsync_AfterAssembling_ShouldThrow_DomainException()
+    public async Task CancelAsync_AfterPayment_ShouldThrow_DomainException()
     {
         var order = OrderFactory.CreateOrder();
         SetupGet(order);
         await _sut.PayAsync(order.Id);
-        await _sut.AssembleAsync(order.Id);
 
         var act = () => _sut.CancelAsync(order.Id, "too late");
 
@@ -88,26 +87,12 @@ public class OrderLifecycleServiceTests
     }
 
     [Fact]
-    public async Task CancelAsync_WhenPaid_ShouldRefund()
+    public async Task CancelAsync_BeforePayment_ShouldCancel_AndNotRefund()
     {
         var order = OrderFactory.CreateOrder();
         SetupGet(order);
-        await _sut.PayAsync(order.Id);
 
         var result = await _sut.CancelAsync(order.Id, "changed mind");
-
-        result.Status.Should().Be(nameof(OrderStatus.Cancelled));
-        _publisher.Verify(b => b.PublishAsync(It.IsAny<OrderCancelledEvent>(), It.IsAny<CancellationToken>()), Times.Once);
-        _publisher.Verify(b => b.PublishAsync(It.IsAny<OrderRefundedEvent>(), It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task CancelAsync_WhenNotPaid_ShouldNotRefund()
-    {
-        var order = OrderFactory.CreateOrder();
-        SetupGet(order);
-
-        var result = await _sut.CancelAsync(order.Id, "mistake");
 
         result.Status.Should().Be(nameof(OrderStatus.Cancelled));
         _publisher.Verify(b => b.PublishAsync(It.IsAny<OrderCancelledEvent>(), It.IsAny<CancellationToken>()), Times.Once);

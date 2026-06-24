@@ -61,13 +61,10 @@ public class OrderStateMachineTests
         order.Status.Should().Be(OrderStatus.Returned);
     }
 
-    [Theory]
-    [InlineData(OrderStatus.Created)]
-    [InlineData(OrderStatus.Paid)]
-    public void Cancel_ShouldBeAllowed_BeforeAssembling(OrderStatus reachStatus)
+    [Fact]
+    public void Cancel_ShouldBeAllowed_OnlyBeforePayment()
     {
         var order = OrderFactory.CreateOrder();
-        DriveTo(order, reachStatus);
 
         order.Cancel("test");
 
@@ -75,11 +72,10 @@ public class OrderStateMachineTests
     }
 
     [Fact]
-    public void Cancel_AfterAssembling_ShouldThrow()
+    public void Cancel_AfterPayment_ShouldThrow()
     {
         var order = OrderFactory.CreateOrder();
         order.MarkAsPaid();
-        order.StartAssembling();
 
         var act = () => order.Cancel();
 
@@ -117,11 +113,4 @@ public class OrderStateMachineTests
         order.TotalAmount.Amount.Should().Be(300m); // 3 * (50 * 2)
     }
 
-    private static void DriveTo(Domain.Models.Order order, OrderStatus target)
-    {
-        if (target == OrderStatus.Created) return;
-        order.MarkAsPaid();
-        if (target == OrderStatus.Paid) return;
-        order.StartAssembling();
-    }
 }
